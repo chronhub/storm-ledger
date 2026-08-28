@@ -1,0 +1,40 @@
+{
+    "name": "chronhub/storm-ledger",
+    "description": "Storm Ledger — framework schema bootstrap: create / drop / reset the Storm tables (event store + projector), verified against the catalogs.",
+    "type": "library",
+    "license": "MIT",
+    "keywords": ["ddd", "event-sourcing", "schema"],
+    "require": {
+        "php": ">=8.5",
+        "ext-sodium": "*",
+        "chronhub/storm-aggregate-repository": "self.version",
+        "chronhub/storm-contracts": "self.version",
+        "chronhub/storm-chronicler": "self.version",
+        "chronhub/storm-event-links": "self.version",
+        "chronhub/storm-projector": "self.version",
+        "chronhub/storm-support": "self.version",
+        "doctrine/dbal": "^4.0",
+        "symfony/console": "^8.1",
+        "symfony/dependency-injection": "^8.1"
+    },
+    "require-dev": {
+        "chronhub/storm-stream": "self.version",
+        "phpstan/phpstan": "^2.2.8",
+        "phpunit/phpunit": "^13.3.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Storm\\Ledger\\": "./"
+        },
+        "exclude-from-classmap": [
+            "/Tests/"
+        ]
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Storm\\Ledger\\Tests\\": "Tests/"
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
