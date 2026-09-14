@@ -213,6 +213,45 @@ final class SubjectForgetterTest extends TestCase
         };
     }
 
+    #[Test]
+    public function locks_in_name_order_before_any_hook_and_preserves_report_order(): void
+    {
+        $first = $this->volunteer('z_customer');
+        $second = $this->volunteer('a_invoice');
+        $connection = $this->recordingConnection();
+        $store = $this->createMock(ProjectionStore::class);
+        $locked = [];
+        $store->expects(self::exactly(2))->method('lockForForget')->willReturnCallback(
+            static function (string $name) use (&$locked, $first, $second, $connection): void {
+                self::assertFalse($first->forgotten);
+                self::assertFalse($second->forgotten);
+                self::assertSame(['begin'], $connection->calls);
+                $locked[] = $name;
+            },
+        );
+        $outcome = new SubjectForgetter($this->keys(), new ProjectionRegistry([$first, $second]), ProjectionLanes::single($store, $connection))->forget('subject-1');
+        self::assertSame(['a_invoice', 'z_customer'], $locked);
+        self::assertSame(['z_customer', 'a_invoice'], $outcome->touched);
+        self::assertSame(['begin', 'commit'], $connection->calls);
+    }
+
+    #[Test]
+    public function a_failed_fence_rolls_back_without_invoking_hooks(): void
+    {
+        $projection = $this->volunteer('customer');
+        $connection = $this->recordingConnection();
+        $store = $this->createMock(ProjectionStore::class);
+        $store->expects(self::once())->method('lockForForget')->willThrowException(new RuntimeException('lock timeout'));
+        try {
+            new SubjectForgetter($this->keys(), new ProjectionRegistry([$projection]), ProjectionLanes::single($store, $connection))->forget('subject-1');
+            self::fail('The failed fence must prevent a success report.');
+        } catch (ForgetIncomplete $failure) {
+            self::assertSame('lock timeout', $failure->getPrevious()?->getMessage());
+            self::assertFalse($projection->forgotten);
+            self::assertSame(['begin', 'rollBack'], $connection->calls);
+        }
+    }
+
     /**
      * @param  list<ReadModel>  $projections
      */

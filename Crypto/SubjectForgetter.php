@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Storm\Ledger\Crypto;
 
-use Doctrine\DBAL\Connection;
 use Storm\Contracts\Serializer\CipherKeyStore;
 use Storm\Ledger\Exception\ForgetIncomplete;
 use Storm\Ledger\Exception\PersonalDataNotDeclared;
@@ -12,6 +11,7 @@ use Storm\Projector\Definition\ForgetsSubject;
 use Storm\Projector\Definition\Projection;
 use Storm\Projector\Definition\ReadModel;
 use Storm\Projector\Registry\ProjectionRegistry;
+use Storm\Projector\Run\ProjectionLane;
 use Storm\Projector\Run\ProjectionLanes;
 use Throwable;
 
@@ -22,6 +22,9 @@ use function spl_object_id;
  * cipher key, then run every volunteering projection's {@see \Storm\Projector\Definition\ForgetsSubject} hook, grouped by home,
  * each home's volunteers inside ONE transaction so a partial forget never commits, and answer the
  * {@see ForgetOutcome} report naming what ran AND what did not.
+ *
+ * Each home locks its volunteers' checkpoints in name order before invoking hooks. An in-flight
+ * batch commits before erasure, and subsequent batches read the destroyed key's fallbacks.
  *
  * The key goes first, deliberately. That order is safe because hooks are idempotent by contract: a
  * home that fails rolls back and throws {@see ForgetIncomplete}, and the re-run redoes every hook,
@@ -60,13 +63,20 @@ final readonly class SubjectForgetter
 
         $touched = [];
 
-        foreach ($this->volunteersByHome() as [$connection, $entries]) {
+        foreach ($this->volunteersByHome() as [$lane, $entries]) {
+            $connection = $lane->connection;
             $connection->beginTransaction();
 
             $name = '';
             $homeTouched = [];
 
             try {
+                $lockNames = array_column($entries, 0);
+                sort($lockNames, SORT_STRING);
+                foreach ($lockNames as $name) {
+                    $lane->store->lockForForget($name);
+                }
+
                 foreach ($entries as [$name, $volunteer]) {
                     $volunteer->forgetSubject($subject, $connection);
                     $homeTouched[] = $name;
@@ -122,7 +132,7 @@ final readonly class SubjectForgetter
      * Volunteers grouped by their home's connection: one transaction per DISTINCT home, the
      * single-database default collapsing to one.
      *
-     * @return list<array{Connection, non-empty-list<array{string, ForgetsSubject}>}>
+     * @return list<array{ProjectionLane, non-empty-list<array{string, ForgetsSubject}>}>
      */
     private function volunteersByHome(): array
     {
@@ -130,7 +140,7 @@ final readonly class SubjectForgetter
             return [];
         }
 
-        /** @var array<int, array{Connection, non-empty-list<array{string, ForgetsSubject}>}> $homes */
+        /** @var array<int, array{ProjectionLane, non-empty-list<array{string, ForgetsSubject}>}> $homes */
         $homes = [];
 
         foreach ($this->projections() as $projection) {
@@ -138,9 +148,10 @@ final readonly class SubjectForgetter
                 continue;
             }
 
-            $connection = $this->lanes->laneFor($projection)->connection;
+            $lane = $this->lanes->laneFor($projection);
+            $connection = $lane->connection;
 
-            $homes[spl_object_id($connection)] ??= [$connection, []];
+            $homes[spl_object_id($connection)] ??= [$lane, []];
             $homes[spl_object_id($connection)][1][] = [$projection->name(), $projection];
         }
 

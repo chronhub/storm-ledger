@@ -88,6 +88,11 @@ final readonly class SchemaConformance
             'occurred_at' => 'timestamp(6) with time zone not null',
             'failed_at' => 'timestamp(6) with time zone null',
         ],
+        'es_outbox_relay' => [
+            'relay' => 'text not null',
+            'ticked_at' => 'timestamp(6) with time zone not null',
+            'relayed_total' => 'bigint not null',
+        ],
         'es_outbox_archive' => [
             'id' => 'bigint not null',
             'position' => 'bigint not null',
@@ -104,6 +109,8 @@ final readonly class SchemaConformance
             'consumer' => 'text not null',
             'message_id' => 'text not null',
             'processed_at' => 'timestamp(6) with time zone not null',
+            'duplicates' => 'integer not null',
+            'last_duplicate_at' => 'timestamp(6) with time zone null',
         ],
         'projections' => [
             'name' => 'text not null',
@@ -212,12 +219,19 @@ final readonly class SchemaConformance
             'es_outbox_attempts_chk' => 'attempts >= 0',
             'es_outbox_failed_at_chk' => "(failed_at IS NOT NULL) = (status = 'failed'",
         ],
+        'es_outbox_relay' => [
+            'es_outbox_relay_pk' => 'PRIMARY KEY (relay)',
+            'es_outbox_relay_relayed_total_chk' => 'relayed_total >= 0',
+        ],
         'es_outbox_archive' => [
             'es_outbox_archive_pk' => 'PRIMARY KEY (id)',
             'es_outbox_archive_position_chk' => null,
             'es_outbox_archive_attempts_chk' => 'attempts >= 0',
         ],
-        'es_inbox' => ['es_inbox_pk' => 'PRIMARY KEY (consumer, message_id)'],
+        'es_inbox' => [
+            'es_inbox_pk' => 'PRIMARY KEY (consumer, message_id)',
+            'es_inbox_duplicates_chk' => 'duplicates >= 0',
+        ],
         'projections' => ['projections_pk' => 'PRIMARY KEY (name)'],
         'event_links' => [
             'event_links_pk' => 'PRIMARY KEY (target_stream, target_position)',
@@ -241,7 +255,7 @@ final readonly class SchemaConformance
     public const array INDEXES = [
         'event_store' => [
             'event_store_sequence_no_idx' => null,
-            'event_store_correlation_idx' => '__correlation_id',
+            'event_store_correlation_idx' => "#>> '{__correlation_id}'",
         ],
         'es_outbox' => [
             'es_outbox_pending_idx' => "WHERE (status = 'pending'",

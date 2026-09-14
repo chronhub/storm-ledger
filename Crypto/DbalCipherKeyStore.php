@@ -210,9 +210,10 @@ final readonly class DbalCipherKeyStore implements CipherKeyStore
     }
 
     /**
-     * Wrap raw material under the master key, in the same versioned envelope the payload fields
-     * use: `v1:<base64 nonce>:<base64 ciphertext>`, the subject as additional data so a wrapped
-     * key pasted onto another subject's row fails authentication.
+     * Wrap raw material under the master key as `v1:<base64 nonce>:<base64 ciphertext>`.
+     *
+     * The subject is additional data, so a wrapped key pasted onto another subject's row fails
+     * authentication. This key envelope has its own format, independent of payload field envelopes.
      *
      * @throws InvalidMasterKey when the master key is malformed
      */
