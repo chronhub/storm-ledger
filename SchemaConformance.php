@@ -79,8 +79,6 @@ final readonly class SchemaConformance
             'partition_key' => 'text not null',
             'type' => 'text not null',
             'event_version' => 'smallint not null',
-            'header' => 'jsonb not null',
-            'content' => 'jsonb not null',
             'status' => 'text not null',
             'attempts' => 'integer not null',
             'last_error' => 'text null',
@@ -105,9 +103,13 @@ final readonly class SchemaConformance
             'occurred_at' => 'timestamp(6) with time zone not null',
             'archived_at' => 'timestamp(6) with time zone not null',
         ],
+        'es_inbox_consumers' => [
+            'id' => 'smallint not null',
+            'name' => 'text not null',
+        ],
         'es_inbox' => [
-            'consumer' => 'text not null',
-            'message_id' => 'text not null',
+            'consumer_id' => 'smallint not null',
+            'message_id' => 'bytea not null',
             'processed_at' => 'timestamp(6) with time zone not null',
             'duplicates' => 'integer not null',
             'last_duplicate_at' => 'timestamp(6) with time zone null',
@@ -228,9 +230,14 @@ final readonly class SchemaConformance
             'es_outbox_archive_position_chk' => null,
             'es_outbox_archive_attempts_chk' => 'attempts >= 0',
         ],
+        'es_inbox_consumers' => [
+            'es_inbox_consumers_pk' => 'PRIMARY KEY (id)',
+            'es_inbox_consumers_name_uq' => 'UNIQUE (name)',
+        ],
         'es_inbox' => [
-            'es_inbox_pk' => 'PRIMARY KEY (consumer, message_id)',
+            'es_inbox_pk' => 'PRIMARY KEY (consumer_id, message_id)',
             'es_inbox_duplicates_chk' => 'duplicates >= 0',
+            'es_inbox_key_length_chk' => 'octet_length(message_id) = ANY (ARRAY[16, 32])',
         ],
         'projections' => ['projections_pk' => 'PRIMARY KEY (name)'],
         'event_links' => [
@@ -269,7 +276,11 @@ final readonly class SchemaConformance
             'es_outbox_failed_idx' => "WHERE (status = 'failed'",
         ],
         'es_outbox_archive' => ['es_outbox_archive_age_idx' => null],
-        'es_inbox' => ['es_inbox_age_idx' => null],
+        'es_inbox' => [
+            'es_inbox_age_idx' => null,
+            // the duplicate gauges' partial index: the predicate is what keeps a scrape off the table
+            'es_inbox_duplicates_idx' => 'WHERE (duplicates > 0)',
+        ],
     ];
 
     /** Tables that must be partitioned parents, with `relkind = 'p'`. */
@@ -293,6 +304,7 @@ final readonly class SchemaConformance
     public const array IDENTITIES = [
         'event_store' => ['sequence_no' => 'a'],
         'event_store_default' => ['sequence_no' => 'a'],
+        'es_inbox_consumers' => ['id' => 'a'],
     ];
 
     /**

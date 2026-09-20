@@ -90,5 +90,7 @@ the architecture gates and the full internal documentation live.
 
 ---
 
-*Pre-version: this package changes without deprecation cycles — pin a commit if you need
-stability, expect resets rather than migrations until the first tagged version.*
+*Experimental 0.x: this package changes without deprecation cycles — no backward-compatibility
+promise and no legacy layer. Pin an exact 0.x tag or commit for reproducibility; pinning fixes
+history, not a stable API. Schema changes are resets, not migrations, and a reset destroys data,
+so it stays on disposable environments.*
