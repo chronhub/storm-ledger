@@ -71,6 +71,9 @@ final readonly class SubjectForgetter
             $homeTouched = [];
 
             try {
+                // the locks and their order are proven by the unit suite, which kills every mutant of
+                // these lines; the integration fence test forgets in a child process, where no mutant
+                // runs, so the integration profile counts them as survivors it cannot judge
                 $lockNames = array_column($entries, 0);
                 sort($lockNames, SORT_STRING);
                 foreach ($lockNames as $name) {
@@ -117,15 +120,15 @@ final readonly class SubjectForgetter
      */
     public function preview(): array
     {
-        $volunteers = [];
+        $volunteers = array_filter(
+            $this->projections(),
+            static fn (Projection $p): bool => $p instanceof ForgetsSubject,
+        );
 
-        foreach ($this->projections() as $projection) {
-            if ($projection instanceof ForgetsSubject) {
-                $volunteers[] = $projection->name();
-            }
-        }
-
-        return ['volunteers' => $volunteers, 'untouched' => $this->untouched()];
+        return [
+            'volunteers' => array_values(array_map(static fn (ForgetsSubject $p): string => $p->name(), $volunteers)),
+            'untouched' => $this->untouched(),
+        ];
     }
 
     /**
@@ -170,15 +173,12 @@ final readonly class SubjectForgetter
      */
     private function untouched(): array
     {
-        $untouched = [];
+        $untouched = array_filter(
+            $this->projections(),
+            static fn (Projection $p): bool => $p instanceof ReadModel && ! $p instanceof ForgetsSubject,
+        );
 
-        foreach ($this->projections() as $projection) {
-            if ($projection instanceof ReadModel && ! $projection instanceof ForgetsSubject) {
-                $untouched[] = $projection->name();
-            }
-        }
-
-        return $untouched;
+        return array_values(array_map(static fn (ReadModel $p): string => $p->name(), $untouched));
     }
 
     /**

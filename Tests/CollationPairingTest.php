@@ -58,6 +58,16 @@ final class CollationPairingTest extends TestCase
             'workflow_instances.root_correlation_id',
             'workflow_correlations.correlation_id',
         ],
+
+        // the pause probes of the timer claim and of the relay claim, the redrive flip and its
+        // diagnostic, the failed batch, retention, reconciliation and the timer audit compare an
+        // instance's correlation with a timer's or an effect's. No byte range is walked here: the
+        // pin follows the instance's
+        'the saga timer and effect joins' => [
+            'workflow_instances.correlation_id',
+            'workflow_timers.correlation_id',
+            'workflow_outbox.correlation_id',
+        ],
     ];
 
     /**

@@ -53,7 +53,7 @@ final readonly class DbalCipherKeyStore implements CipherKeyStore
     public function keyFor(string $subject): ?string
     {
         $material = $this->connection->fetchOne(
-            /** @lang PostgreSQL */
+            /* language=PostgreSQL */
             'SELECT key_material FROM crypto_keys WHERE subject = :subject',
             ['subject' => $subject],
         );
@@ -85,7 +85,7 @@ final readonly class DbalCipherKeyStore implements CipherKeyStore
         $material = random_bytes(SODIUM_CRYPTO_AEAD_XCHACHA20POLY1305_IETF_KEYBYTES);
 
         $this->connection->executeStatement(
-            /** @lang PostgreSQL */
+            /* language=PostgreSQL */
             'INSERT INTO crypto_keys (subject, key_material, created_at) VALUES (:subject, :material, now())
              ON CONFLICT (subject) DO NOTHING',
             ['subject' => $subject, 'material' => $this->wrap($material, $subject)],
@@ -106,7 +106,7 @@ final readonly class DbalCipherKeyStore implements CipherKeyStore
     public function destroy(string $subject): bool
     {
         $tombstoned = $this->connection->executeStatement(
-            /** @lang PostgreSQL */
+            /* language=PostgreSQL */
             'UPDATE crypto_keys SET key_material = NULL, destroyed_at = now()
              WHERE subject = :subject AND destroyed_at IS NULL',
             ['subject' => $subject],
@@ -120,7 +120,7 @@ final readonly class DbalCipherKeyStore implements CipherKeyStore
         // proof-of-forgetting tombstone; a racing issue() loses to the conflict and the retried
         // UPDATE settles it
         $inserted = $this->connection->executeStatement(
-            /** @lang PostgreSQL */
+            /* language=PostgreSQL */
             'INSERT INTO crypto_keys (subject, key_material, created_at, destroyed_at) VALUES (:subject, NULL, now(), now())
              ON CONFLICT (subject) DO NOTHING',
             ['subject' => $subject],
@@ -131,7 +131,7 @@ final readonly class DbalCipherKeyStore implements CipherKeyStore
         }
 
         return $this->connection->executeStatement(
-            /** @lang PostgreSQL */
+            /* language=PostgreSQL */
             'UPDATE crypto_keys SET key_material = NULL, destroyed_at = now()
              WHERE subject = :subject AND destroyed_at IS NULL',
             ['subject' => $subject],
@@ -149,7 +149,7 @@ final readonly class DbalCipherKeyStore implements CipherKeyStore
         // textual 'f' cast to PHP bool would read every LIVE key as destroyed, a silent total
         // redaction of live data
         return (int) $this->connection->fetchOne(
-            /** @lang PostgreSQL */
+            /* language=PostgreSQL */
             'SELECT (destroyed_at IS NOT NULL)::int FROM crypto_keys WHERE subject = :subject',
             ['subject' => $subject],
         ) === 1;
@@ -171,7 +171,7 @@ final readonly class DbalCipherKeyStore implements CipherKeyStore
 
         /** @var array{subject: string, key_material: string}|false $row */
         $row = $this->connection->fetchAssociative(
-            /** @lang PostgreSQL */
+            /* language=PostgreSQL */
             'SELECT subject, key_material FROM crypto_keys WHERE key_material IS NOT NULL LIMIT 1',
         );
 
@@ -193,7 +193,7 @@ final readonly class DbalCipherKeyStore implements CipherKeyStore
     {
         /** @var array{key_material: string|null}|false $row */
         $row = $this->connection->fetchAssociative(
-            /** @lang PostgreSQL */
+            /* language=PostgreSQL */
             'SELECT key_material FROM crypto_keys WHERE subject = :subject',
             ['subject' => $subject],
         );

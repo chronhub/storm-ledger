@@ -12,6 +12,7 @@ use Storm\Chronicler\Evolution\UpcasterConformance;
 use Storm\Chronicler\SafeHead\SafeHeadPrecondition;
 use Storm\Chronicler\Schema\EventStoreHighWaterSchema;
 use Storm\Chronicler\Schema\EventStoreSchema;
+use Storm\Chronicler\Schema\IdempotencyRegistrySchema;
 use Storm\Chronicler\Schema\InboxSchema;
 use Storm\Chronicler\Schema\OutboxArchiveSchema;
 use Storm\Chronicler\Schema\OutboxSchema;
@@ -60,7 +61,9 @@ use Throwable;
  *   are interrogated by {@see SchemaConformance}, and a pre-existing incompatible homonym such
  *   as a `stream_heads` without `last_version` or an index that lost its predicate fails the
  *   install loud with the divergence listed, transaction rolled back, before any success is
- *   reported.
+ *   reported. Existing named indexes skip redundant DDL so a conformant reinstallation does
+ *   not hold index-build locks across the data audit. Missing indexes are still built normally;
+ *   first installs, repairs and resets can block writers until their transaction ends.
  *
  * - When the compiled `#[Personal]` map is non-empty, the privacy MASTER key is proven with the
  *   same discipline: well-formed, and unwrapping one sampled existing row, so a malformed or
@@ -286,7 +289,7 @@ final class StormInstallCommand extends Command
         foreach ($homes as $side => $connection) {
             /** @var list<string> $schemas */
             $schemas = $connection->fetchFirstColumn(
-                /** @lang PostgreSQL */
+                /* language=PostgreSQL */
                 "SELECT n.nspname
                  FROM unnest(current_schemas(false)) AS s(name)
                  JOIN pg_namespace n ON n.nspname = s.name
@@ -359,7 +362,9 @@ final class StormInstallCommand extends Command
             InstallLock::acquire($connection, self::ADVISORY_LOCK_KEY, 'storm:install');
 
             foreach ([...$down, ...$up] as $statement) {
-                $connection->executeStatement($statement);
+                if (! $this->indexAlreadyPresent($connection, $statement)) {
+                    $connection->executeStatement($statement);
+                }
             }
 
             if ($up !== []) {
@@ -395,6 +400,25 @@ final class StormInstallCommand extends Command
     }
 
     /**
+     * Avoid the writer-blocking lock of a redundant `CREATE INDEX` while retaining conformance.
+     * Only the plain identifiers emitted by the core schema manifest are recognized; other DDL
+     * executes normally. Resolve the index in its table's schema, not a later search-path schema.
+     *
+     * @throws Exception on a DBAL failure reading the catalog
+     */
+    private function indexAlreadyPresent(Connection $connection, string $statement): bool
+    {
+        if (preg_match('/\ACREATE INDEX IF NOT EXISTS ([a-z_][a-z0-9_]*) ON ([a-z_][a-z0-9_]*)(?=\s|\()/D', trim($statement), $matches) !== 1) {
+            return false;
+        }
+
+        return (bool) $connection->fetchOne(
+            'SELECT EXISTS (SELECT 1 FROM pg_class i JOIN pg_class t ON t.relnamespace = i.relnamespace WHERE t.oid = to_regclass(?) AND i.relname = ?)',
+            [$matches[2], $matches[1]],
+        );
+    }
+
+    /**
      * Where this connection's DDL lands. The schema is `search_path`-relative by design, the
      * application pivoting both sides through it, so the target is printed, never assumed.
      *
@@ -406,7 +430,7 @@ final class StormInstallCommand extends Command
     {
         /** @var array{db: string, schema: string, version: string, version_num: int|string} $row */
         $row = $connection->fetchAssociative(
-            /** @lang PostgreSQL */
+            /* language=PostgreSQL */
             "SELECT current_database() AS db, current_schema() AS schema,
                     current_setting('server_version') AS version,
                     current_setting('server_version_num')::int AS version_num",
@@ -427,6 +451,7 @@ final class StormInstallCommand extends Command
             ...OutboxSchema::up(),
             ...OutboxArchiveSchema::up(),
             ...InboxSchema::up(),
+            ...IdempotencyRegistrySchema::up(),
             ...ProjectionSchema::up(), // BOTH sides: the link producers' events-side home; the store side runs its own pass
             ...EventLinkSchema::up(),
             ...EventLinkStreamSchema::up(),
@@ -446,6 +471,7 @@ final class StormInstallCommand extends Command
             ...EventLinkStreamSchema::down(),
             ...EventLinkSchema::down(),
             ...ProjectionSchema::down(),
+            ...IdempotencyRegistrySchema::down(),
             ...InboxSchema::down(),
             ...OutboxArchiveSchema::down(),
             ...OutboxSchema::down(),

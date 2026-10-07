@@ -11,6 +11,7 @@ use RuntimeException;
 use Storm\AggregateRepository\Schema\SnapshotSchema;
 use Storm\Chronicler\Schema\EventStoreHighWaterSchema;
 use Storm\Chronicler\Schema\EventStoreSchema;
+use Storm\Chronicler\Schema\IdempotencyRegistrySchema;
 use Storm\Chronicler\Schema\InboxSchema;
 use Storm\Chronicler\Schema\OutboxArchiveSchema;
 use Storm\Chronicler\Schema\OutboxSchema;
@@ -136,6 +137,7 @@ final class StormInstallCommandFloorTest extends TestCase
             ...OutboxSchema::up(),
             ...OutboxArchiveSchema::up(),
             ...InboxSchema::up(),
+            ...IdempotencyRegistrySchema::up(),
             ...ProjectionSchema::up(),
             ...EventLinkSchema::up(),
             ...EventLinkStreamSchema::up(),
@@ -153,7 +155,7 @@ final class StormInstallCommandFloorTest extends TestCase
         $connection->method('fetchOne')->willReturnCallback(function (string $sql) use (&$sawLockTimeout): int {
             $sawLockTimeout = $sawLockTimeout || str_contains($sql, 'pg_try_advisory_xact_lock');
 
-            return 1;
+            return str_contains($sql, 'pg_try_advisory_xact_lock') ? 1 : 0;
         });
         $executed = [];
         $connection->method('executeStatement')->willReturnCallback(function (string $sql) use (&$executed): int {
@@ -184,6 +186,7 @@ final class StormInstallCommandFloorTest extends TestCase
             ...EventLinkStreamSchema::down(),
             ...EventLinkSchema::down(),
             ...ProjectionSchema::down(),
+            ...IdempotencyRegistrySchema::down(),
             ...InboxSchema::down(),
             ...OutboxArchiveSchema::down(),
             ...OutboxSchema::down(),

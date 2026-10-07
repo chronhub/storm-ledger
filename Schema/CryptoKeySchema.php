@@ -29,7 +29,7 @@ final class CryptoKeySchema
     public static function up(): array
     {
         return [
-            /** @lang PostgreSQL */
+            /* language=PostgreSQL */
             <<<'SQL'
                 CREATE TABLE IF NOT EXISTS crypto_keys (
                     subject       text        NOT NULL,
@@ -51,7 +51,7 @@ final class CryptoKeySchema
     public static function down(): array
     {
         return [
-            /** @lang PostgreSQL */
+            /* language=PostgreSQL */
             'DROP TABLE IF EXISTS crypto_keys',
         ];
     }

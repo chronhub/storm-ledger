@@ -57,6 +57,13 @@ final readonly class SchemaConformance
      * @var array<string, array<string, string|null>>
      */
     public const array COLUMNS = [
+        'es_idempotency' => [
+            'scope_hash' => 'text not null',
+            'key_hash' => 'text not null',
+            'fingerprint' => 'text not null',
+            'message_id' => 'text not null',
+            'expires_at' => 'timestamp(6) with time zone not null',
+        ],
         'event_store' => self::EVENT_STORE_COLUMNS,
         // a LIST partition's default child carries the parent's columns by construction; ONE
         // spelling serves both so the pair can never be edited apart
@@ -69,7 +76,8 @@ final readonly class SchemaConformance
         'stream_heads' => [
             // the collation is verified, not assumed: a table installed before it was pinned carries
             // the right type and the right nullability, so a shape-only check blesses it while the
-            // snapshot sweep silently selects nothing on it
+            // snapshot sweep, whose explicit `COLLATE "C"` keeps its rows right, loses the primary
+            // key it ranges over
             'stream' => 'text not null collate C',
             'last_version' => 'bigint not null',
         ],
@@ -167,10 +175,11 @@ final readonly class SchemaConformance
 
     /**
      * Named constraints per table; the OCC unique and the CHECKs are load-bearing invariants. A
-     * non-null value is a fragment the live `pg_get_constraintdef` must contain: a name alone proves
-     * nothing about a pre-existing homonym, since `ADD CONSTRAINT` converges on `duplicate_object`
-     * exactly as `CREATE … IF NOT EXISTS` does, and a CHECK that silently lost a value bites at
-     * runtime, not at install.
+     * non-null value opening on its definition keyword is the complete definition the live
+     * `pg_get_constraintdef` must equal, and any other is a fragment it must contain, the rule
+     * `ConstraintShape` applies. A name alone proves nothing about a pre-existing homonym, since
+     * `ADD CONSTRAINT` converges on `duplicate_object` exactly as `CREATE … IF NOT EXISTS` does,
+     * and a CHECK that silently lost a value bites at runtime, not at install.
      *
      * The value-range CHECKs are a SECOND line of defense, not a guard on the normal paths, which
      * cannot produce a negative attempt count or a version of 0. They exist for restores, manual repair
@@ -178,9 +187,10 @@ final readonly class SchemaConformance
      * CREATE TABLE only: pre-version posture means an older store is recreated, not converged, and its
      * missing constraint surfaces here as a loud install refusal rather than a silent absence.
      *
-     * Fragments are declared where a degraded homonym bites and where a substring is stable across
-     * BOTH the source DDL and PostgreSQL's deparse; `SchemaCompletenessTest` pins each fragment
-     * against the rendered DDL, and the live probe compares it against `pg_get_constraintdef`:
+     * Values are declared where a degraded homonym bites and where the text is stable across BOTH
+     * the source DDL and PostgreSQL's deparse; `SchemaCompletenessTest` pins each value against the
+     * rendered DDL, a complete CHECK in its declared form with one parenthesis pair less, and the
+     * live probe compares it against `pg_get_constraintdef`:
      *
      * - `es_outbox_status_chk` pins `'failed'`, the dead-letter status: an outbox predating that
      *   disposition passes a name-only probe and the first dead-letter UPDATE explodes at runtime.
@@ -189,46 +199,53 @@ final readonly class SchemaConformance
      * - `es_outbox_failed_at_chk` pins the whole bi-implication: with only half of it, a row reads
      *   as a dead letter to one surface and as live work to another.
      *
-     * - The numeric floors pin their exact predicate, except on `position`, a keyword PostgreSQL
-     *   quotes on deparse as `"position" > 0`, where no fragment is stable across both renderings;
+     * - The numeric floors pin their complete definition, except on `position`, a keyword PostgreSQL
+     *   quotes on deparse as `"position" > 0`, where no text is stable across both renderings;
      *   those two stay presence-only, the least-biting degradations of the set.
      *
      * - Every named primary key pins its full column list: `PRIMARY KEY (…)` deparses verbatim, and
      *   a homonym keyed differently misroutes the OCC target and every upsert in silence.
      */
     public const array CONSTRAINTS = [
+        'es_idempotency' => [
+            'es_idempotency_pk' => 'PRIMARY KEY (scope_hash, key_hash)',
+            'es_idempotency_scope_chk' => "scope_hash ~ '^[0-9a-f]{64}$'",
+            'es_idempotency_key_chk' => "key_hash ~ '^[0-9a-f]{64}$'",
+            'es_idempotency_fingerprint_chk' => "fingerprint ~ '^[0-9a-f]{64}$'",
+            'es_idempotency_identity_chk' => 'CHECK ((length(message_id) > 0))',
+        ],
         'event_store' => [
             'event_store_pk' => 'PRIMARY KEY (category, sequence_no)',
             'event_store_stream_version_uq' => null,
             'event_store_cat_stream_chk' => "category = split_part(stream, '-'",
-            'event_store_version_chk' => 'version > 0',
-            'event_store_event_version_chk' => 'event_version > 0',
+            'event_store_version_chk' => 'CHECK ((version > 0))',
+            'event_store_event_version_chk' => 'CHECK ((event_version > 0))',
         ],
         'event_store_high_water' => [
             'event_store_high_water_pk' => 'PRIMARY KEY (id)',
-            'event_store_high_water_singleton_chk' => 'id = 1',
+            'event_store_high_water_singleton_chk' => 'CHECK ((id = 1))',
             'event_store_high_water_position_chk' => null,
         ],
         'stream_heads' => [
             'stream_heads_pk' => 'PRIMARY KEY (stream)',
-            'stream_heads_last_version_chk' => 'last_version >= 0',
+            'stream_heads_last_version_chk' => 'CHECK ((last_version >= 0))',
         ],
         'es_outbox' => [
             'es_outbox_pk' => 'PRIMARY KEY (id)',
             'es_outbox_status_chk' => "'failed'",
             'es_outbox_position_chk' => null,
-            'es_outbox_event_version_chk' => 'event_version > 0',
-            'es_outbox_attempts_chk' => 'attempts >= 0',
+            'es_outbox_event_version_chk' => 'CHECK ((event_version > 0))',
+            'es_outbox_attempts_chk' => 'CHECK ((attempts >= 0))',
             'es_outbox_failed_at_chk' => "(failed_at IS NOT NULL) = (status = 'failed'",
         ],
         'es_outbox_relay' => [
             'es_outbox_relay_pk' => 'PRIMARY KEY (relay)',
-            'es_outbox_relay_relayed_total_chk' => 'relayed_total >= 0',
+            'es_outbox_relay_relayed_total_chk' => 'CHECK ((relayed_total >= 0))',
         ],
         'es_outbox_archive' => [
             'es_outbox_archive_pk' => 'PRIMARY KEY (id)',
             'es_outbox_archive_position_chk' => null,
-            'es_outbox_archive_attempts_chk' => 'attempts >= 0',
+            'es_outbox_archive_attempts_chk' => 'CHECK ((attempts >= 0))',
         ],
         'es_inbox_consumers' => [
             'es_inbox_consumers_pk' => 'PRIMARY KEY (id)',
@@ -236,8 +253,8 @@ final readonly class SchemaConformance
         ],
         'es_inbox' => [
             'es_inbox_pk' => 'PRIMARY KEY (consumer_id, message_id)',
-            'es_inbox_duplicates_chk' => 'duplicates >= 0',
-            'es_inbox_key_length_chk' => 'octet_length(message_id) = ANY (ARRAY[16, 32])',
+            'es_inbox_duplicates_chk' => 'CHECK ((duplicates >= 0))',
+            'es_inbox_key_length_chk' => 'CHECK ((octet_length(message_id) = ANY (ARRAY[16, 32])))',
         ],
         'projections' => ['projections_pk' => 'PRIMARY KEY (name)'],
         'event_links' => [
@@ -260,6 +277,7 @@ final readonly class SchemaConformance
      * worth having, and `CREATE INDEX IF NOT EXISTS` never verifies a homonym kept them.
      */
     public const array INDEXES = [
+        'es_idempotency' => ['es_idempotency_expiration_idx' => 'USING brin (expires_at)'],
         'event_store' => [
             'event_store_sequence_no_idx' => null,
             'event_store_correlation_idx' => "#>> '{__correlation_id}'",
@@ -314,8 +332,8 @@ final readonly class SchemaConformance
      * would just be wrong, silently, which is the case the column-shape check alone cannot see.
      */
     public const array DEFAULTS = [
-        'event_store' => ['xact_id' => 'pg_current_xact_id'],
-        'event_store_default' => ['xact_id' => 'pg_current_xact_id'],
+        'event_store' => ['xact_id' => 'pg_current_xact_id()'],
+        'event_store_default' => ['xact_id' => 'pg_current_xact_id()'],
     ];
 
     /**
